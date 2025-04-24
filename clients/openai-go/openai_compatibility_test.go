@@ -7,11 +7,14 @@ import (
 	//"io/ioutil"
 	//"path/filepath"
 	//"strings"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+
+	//"github.com/openai/openai-go/packages/resp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,13 +34,26 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
+/*type TensorZeroSystemMessage struct {
+	Name string `json:"assistant_name"`
+	JSON struct {
+		Name resp.Field
+	} `json:"-"`
+}*/
+
 // systemAssistant builds a system‑role message acceptable to the
 // TensorZero proxy: { "role": "system", "assistant_name": "<name>" }.
 func systemAssistant(t *testing.T, name string) openai.ChatCompletionMessageParamUnion {
 	n := openai.SystemMessage(name)
-	n.WithExtraFields(map[string]any{
-		"assistant_name": name, //openai.String(name),
-	})
+	n.OfSystem.WithExtraFields(
+		map[string]any{
+			"content": []any{
+				map[string]any{
+					"assistant_name": name,
+				},
+			},
+		},
+	)
 	jsonBytes, err := n.MarshalJSON()
 	require.NoError(t, err)
 	t.Logf("%s", jsonBytes)
@@ -47,17 +63,18 @@ func systemAssistant(t *testing.T, name string) openai.ChatCompletionMessagePara
 func TestOpenAICompatibility(t *testing.T) {
 	t.Run("it should perform basic inference with old model format", func(t *testing.T) {
 		episodeID, _ := uuid.NewV7()
-		y := systemAssistant(t, "Alfred Pennyworth") //{\"type\":\"object\",\"properties\":{\"assistant_name\":{\"type\":\"string\"}},\"required\":[\"assistant_name\"]}")
-		jsonBytes, err := y.MarshalJSON()
-		require.NoError(t, err)
-		t.Logf("%s", jsonBytes)
 		req := &openai.ChatCompletionNewParams{
 			Model: "tensorzero::function_name::basic_test",
 			Messages: []openai.ChatCompletionMessageParamUnion{
-				y,
+				systemAssistant(t, "Alfred Pennyworth"),
 				openai.UserMessage("Hello"),
 			},
 			Temperature: openai.Float(0.4),
+			/*ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+				OfJSONObject: &openai.ResponseFormatJSONObjectParam{
+					Type: "json_object",
+				},
+			},*/
 		}
 		req.WithExtraFields(map[string]any{
 			"tensorzero::episode_id": episodeID.String(),
@@ -70,12 +87,17 @@ func TestOpenAICompatibility(t *testing.T) {
 		resp, err := client.Chat.Completions.New(ctx, *req)
 		require.NoError(t, err)
 
-		//assert.Equal(t, episodeID, resp.JSON.ExtraFields["tensorzero::episode_id"].Raw)
-		//assert.Equal(t, "Megumin gleefully chanted her spell, unleashing a thunderous explosion that lit up the sky and left a massive crater in its wake.", resp.Choices[0].Message.Content)
-		//assert.Equal(t, int64(10), resp.Usage.PromptTokens)
-		//assert.Equal(t, int64(10), resp.Usage.CompletionTokens)
+		t.Log(resp.RawJSON())
+
+		var responseEpisodeID string
+		json.Unmarshal([]byte(resp.JSON.ExtraFields["episode_id"].Raw()), &responseEpisodeID)
+
+		assert.Equal(t, episodeID.String(), responseEpisodeID)
+		assert.Equal(t, "Megumin gleefully chanted her spell, unleashing a thunderous explosion that lit up the sky and left a massive crater in its wake.", resp.Choices[0].Message.Content)
+		assert.Equal(t, int64(10), resp.Usage.PromptTokens)
+		assert.Equal(t, int64(10), resp.Usage.CompletionTokens)
 		assert.Equal(t, int64(20), resp.Usage.TotalTokens)
-		//assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+		assert.Equal(t, "stop", resp.Choices[0].FinishReason)
 	})
 
 	t.Run("it should perform basic inference", func(t *testing.T) {
@@ -131,12 +153,12 @@ func TestOpenAICompatibility(t *testing.T) {
 			Temperature: openai.Float(0.4),
 		}
 		req.WithExtraFields(map[string]interface{}{
-				"tensorzero::episode_id": episodeID.String(),
-				"response_schema": map[string]interface{}{
-					"name": map[string]interface{}{
-						"type": "string",
-					},
+			"tensorzero::episode_id": episodeID.String(),
+			"response_schema": map[string]interface{}{
+				"name": map[string]interface{}{
+					"type": "string",
 				},
+			},
 		})
 
 		_, err := client.Chat.Completions.New(ctx, *req)
