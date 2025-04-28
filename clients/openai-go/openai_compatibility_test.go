@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 }
 
 // systemAssistant builds a system‑role message with Tensorflow's assistant_name
-func systemAssistant(t *testing.T, name string) openai.ChatCompletionMessageParamUnion {
+func systemAssistant(name string) openai.ChatCompletionMessageParamUnion {
 	n := openai.SystemMessage(name)
 	n.OfSystem.WithExtraFields(
 		map[string]any{
@@ -40,9 +40,6 @@ func systemAssistant(t *testing.T, name string) openai.ChatCompletionMessagePara
 			},
 		},
 	)
-	jsonBytes, err := n.MarshalJSON()
-	require.NoError(t, err)
-	t.Logf("%s", jsonBytes)
 	return n
 }
 
@@ -58,7 +55,7 @@ func TestOpenAICompatibility(t *testing.T) {
 		req := &openai.ChatCompletionNewParams{
 			Model: "tensorzero::function_name::basic_test",
 			Messages: []openai.ChatCompletionMessageParamUnion{
-				systemAssistant(t, "Alfred Pennyworth"),
+				systemAssistant("Alfred Pennyworth"),
 				openai.UserMessage("Hello"),
 			},
 			Temperature: openai.Float(0.4),
@@ -131,7 +128,7 @@ func TestOpenAICompatibility(t *testing.T) {
 		req := &openai.ChatCompletionNewParams{
 			Model: "tensorzero::function_name::basic_test",
 			Messages: []openai.ChatCompletionMessageParamUnion{
-				systemAssistant(t, "Alfred Pennyworth"),
+				systemAssistant("Alfred Pennyworth"),
 				openai.UserMessage("Hello"),
 			},
 			Seed: openai.Int(69),
@@ -160,5 +157,64 @@ func TestOpenAICompatibility(t *testing.T) {
 
 			i++
 		}
+	})
+
+	t.Run("it should handle streaming inference with non-existent function", func(T *testing.T) {
+		episodeID, _ := uuid.NewV7()
+		req := &openai.ChatCompletionNewParams{
+			Model: "tensorzero::function_name::does_not_exist",
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				systemAssistant("Alfred Pennyworth"),
+				openai.UserMessage("Hello"),
+			},
+		}
+		setEpisodeID(req, episodeID.String())
+
+		stream := client.Chat.Completions.NewStreaming(ctx, *req)
+		assert.Contains(t, stream.Err().Error(), "Unknown function: does_not_exist")
+	})
+
+	t.Run("it should handle streaming inference with missing function", func(T *testing.T) {
+		episodeID, _ := uuid.NewV7()
+		req := &openai.ChatCompletionNewParams{
+			Model: "tensorzero::function_name::",
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				systemAssistant("Alfred Pennyworth"),
+				openai.UserMessage("Hello"),
+			},
+		}
+		setEpisodeID(req, episodeID.String())
+
+		stream := client.Chat.Completions.NewStreaming(ctx, *req)
+		assert.Contains(t, stream.Err().Error(), "cannot be empty")
+	})
+
+	t.Run("it should handle streaming inference with malformed function", func(T *testing.T) {
+		episodeID, _ := uuid.NewV7()
+		req := &openai.ChatCompletionNewParams{
+			Model: "chatgpt",
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				systemAssistant("Alfred Pennyworth"),
+				openai.UserMessage("Hello"),
+			},
+		}
+		setEpisodeID(req, episodeID.String())
+
+		stream := client.Chat.Completions.NewStreaming(ctx, *req)
+		assert.Contains(t, stream.Err().Error(), "`model` field must start with")
+	})
+
+	t.Run("it should handle streaming inference with missing model", func(T *testing.T) {
+		episodeID, _ := uuid.NewV7()
+		req := &openai.ChatCompletionNewParams{
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				systemAssistant("Alfred Pennyworth"),
+				openai.UserMessage("Hello"),
+			},
+		}
+		setEpisodeID(req, episodeID.String())
+
+		stream := client.Chat.Completions.NewStreaming(ctx, *req)
+		assert.Contains(t, stream.Err().Error(), "missing field `model`")
 	})
 }
