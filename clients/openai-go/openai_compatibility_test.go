@@ -82,17 +82,22 @@ func TestOpenAICompatibility(t *testing.T) {
 		assert.Equal(t, "stop", resp.Choices[0].FinishReason)
 	})
 
-	t.Run("it should handle basic json schema parsing and throw proper validation errors", func(t *testing.T) {
+	t.Run("it should handle basic inference with invalid JSON field and throw proper validation errors", func(t *testing.T) {
 		episodeID, _ := uuid.NewV7()
+		sysMsg := openai.SystemMessage("Alfred Pennyworth")
+		sysMsg.OfSystem.WithExtraFields(
+			map[string]any{
+				"content": []any{
+					map[string]any{
+						"name_of_assistant": "Alfred Pennyworth",
+					},
+				},
+			},
+		)
 		req := &openai.ChatCompletionNewParams{
 			Model: "tensorzero::function_name::basic_test",
 			Messages: []openai.ChatCompletionMessageParamUnion{
-				openai.SystemMessage([]openai.ChatCompletionContentPartTextParam{
-					{
-						Text: "You are Alfred Pennyworth",
-						Type: "system",
-					},
-				}),
+				sysMsg,
 				openai.UserMessage("Hello"),
 			},
 			Temperature: openai.Float(0.4),
@@ -216,5 +221,31 @@ func TestOpenAICompatibility(t *testing.T) {
 
 		stream := client.Chat.Completions.NewStreaming(ctx, *req)
 		assert.Contains(t, stream.Err().Error(), "missing field `model`")
+	})
+
+	t.Run("it should handle streaming inference with malformed input", func(T *testing.T) {
+		episodeID, _ := uuid.NewV7()
+		sysMsg := openai.SystemMessage("Alfred Pennyworth")
+		sysMsg.OfSystem.WithExtraFields(
+			map[string]any{
+				"content": []any{
+					map[string]any{
+						"name_of_assistant": "Alfred Pennyworth",
+					},
+				},
+			},
+		)
+
+		req := &openai.ChatCompletionNewParams{
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				sysMsg,
+				openai.UserMessage("Hello"),
+			},
+			Model: "tensorzero::function_name::basic_test",
+		}
+		setEpisodeID(req, episodeID.String())
+
+		stream := client.Chat.Completions.NewStreaming(ctx, *req)
+		assert.Contains(t, stream.Err().Error(), "JSON Schema validation failed")
 	})
 }
